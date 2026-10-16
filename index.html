@@ -163,6 +163,14 @@ async function ghPut(path, obj, message) {
   if (!r.ok) throw new Error(`Couldn't save to GitHub (${r.status})`);
   return r.json();
 }
+// Rings the doorbell: a comment on the store's "Phone inbox" pull request wakes Claude straight away.
+// If it fails, the hourly check still picks the request up, so errors are ignored.
+function ring(text) {
+  const n = status?.inbox; if (!n) return;
+  fetch(`${API}/repos/${cfg.repo}/issues/${n}/comments`, {method: 'POST', cache: 'no-store',
+    headers: {'Authorization': `Bearer ${cfg.token}`, 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json'},
+    body: JSON.stringify({body: text})}).catch(() => {});
+}
 
 // ---------- Episode list ----------
 async function load() {
@@ -307,6 +315,7 @@ $('rebuild').addEventListener('click', async () => {
     const id = stamp();
     await ghPut(`requests/${cur.id}/${id}.json`, {type: 'rebuild', episode: cur.id, video: cur.video?.id || null,
       notes, from: 'phone', created: new Date().toISOString()}, `Rebuild notes for ${cur.id} from the phone`);
+    ring(`New rebuild notes for ${cur.id}: requests/${cur.id}/${id}.json`);
     LS.set(`sent.${nkey()}`, notes); setNotes([]);
     cur.request = {id, status: 'queued'}; renderReqState();
   } catch (e) { showErr(e.message); $('rebuild').disabled = false; }
@@ -316,6 +325,7 @@ $('qsend').addEventListener('click', async () => {
   try {
     await ghPut(`requests/${cur.id}/${stamp()}-answer.json`, {type: 'answer', episode: cur.id, to: cur.request?.id || null,
       question: cur.request?.question || '', answer: text, from: 'phone', created: new Date().toISOString()}, `Answer for ${cur.id} from the phone`);
+    ring(`Answer for ${cur.id}`);
     $('qans').value = ''; cur.request = {...cur.request, status: 'queued', question: ''}; renderReqState();
   } catch (e) { showErr(e.message); }
 });
