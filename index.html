@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Shed Offline</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+:root{
+  --bg:#111111; --card:#1b1b1e; --card2:#232327; --line:#2e2e33;
+  --fg:#F0EEE6; --muted:#8A8A93; --coral:#D97757; --coral-soft:rgba(217,119,87,.16);
+  --green:#5DBB63; --red:#E5534B; --amber:#E0A84A;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:16px;-webkit-tap-highlight-color:transparent}
+body{padding:calc(env(safe-area-inset-top) + 8px) 16px calc(env(safe-area-inset-bottom) + 24px)}
+header{display:flex;align-items:center;gap:10px;margin:4px 0 14px}
+header h1{font-size:20px;margin:0;flex:1}
+.pill{font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;background:var(--coral-soft);color:var(--coral)}
+.iconbtn{background:var(--card2);border:0;color:var(--fg);width:40px;height:40px;border-radius:50%;font-size:18px;cursor:pointer}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin:10px 0}
+.ep{display:flex;gap:12px;align-items:flex-start;cursor:pointer}
+.dot{flex:none;width:12px;height:12px;border-radius:50%;margin-top:5px}
+.dot.green{background:var(--green)} .dot.red{background:var(--red)}
+.ep h2{font-size:16px;margin:0 0 3px}
+.sub{color:var(--muted);font-size:13px;line-height:1.4}
+.state{margin-top:6px;font-size:13px;font-weight:600}
+.state.working{color:var(--amber)} .state.ready{color:var(--green)} .state.question{color:var(--coral)} .state.queued{color:var(--muted)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:12px;padding:12px 14px;background:var(--card2);color:var(--fg);font:inherit;font-size:15px;font-weight:600;cursor:pointer}
+.btn.primary{background:var(--coral);color:#111}
+.btn.wide{width:100%;margin-top:10px}
+.btn:disabled{opacity:.45}
+.field{width:100%;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:11px 12px;font:inherit;font-size:15px;margin:6px 0 8px}
+textarea.field{min-height:70px;resize:vertical}
+.err{background:rgba(229,83,75,.14);color:#ffb3ae;border-radius:12px;padding:10px 12px;margin:10px 0;font-size:14px}
+.hidden{display:none!important}
+video{width:100%;border-radius:12px;background:#000;max-height:42vh}
+.timebar{display:flex;justify-content:space-between;color:var(--muted);font-size:13px;margin:6px 2px}
+.parts{display:flex;gap:6px;margin:6px 0;flex-wrap:wrap}
+.parts .chip{font-size:12px;padding:5px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+.parts .chip[aria-pressed=true]{background:var(--fg);color:var(--bg)}
+.note{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line)}
+.note:first-child{border-top:0}
+.note .t{flex:none;font-weight:700;color:var(--coral);min-width:44px;cursor:pointer}
+.note .x{flex:none;background:none;border:0;color:var(--muted);font-size:18px;cursor:pointer}
+.note .txt{flex:1;white-space:pre-wrap}
+.row{display:flex;gap:8px}
+.row .field{margin:0}
+.q{background:var(--coral-soft);border-radius:12px;padding:10px 12px;margin:10px 0}
+.small{font-size:12px;color:var(--muted)}
+@media (orientation:landscape) and (max-height:500px){
+  #review.on{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:12px}
+  video{max-height:70vh}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <button class="iconbtn hidden" id="back" aria-label="Back">‹</button>
+  <h1 id="title">Shed Offline</h1>
+  <span class="pill" id="mode">PC off</span>
+  <button class="iconbtn" id="refresh" aria-label="Refresh">⟳</button>
+</header>
+
+<div id="msg" class="err hidden"></div>
+
+<!-- First run: GitHub key -->
+<section id="setup" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;font-size:17px">Connect to your shed-cloud store</h2>
+    <p class="sub">Paste the GitHub key you made for <b>shed-cloud</b>. It stays on this phone only.</p>
+    <label class="small" for="repo">Store</label>
+    <input class="field" id="repo" value="buttymanUK/shed-cloud" autocapitalize="off" autocomplete="off" spellcheck="false">
+    <label class="small" for="tok">GitHub key</label>
+    <input class="field" id="tok" type="password" placeholder="github_pat_…" autocapitalize="off" autocomplete="off" spellcheck="false">
+    <button class="btn primary wide" id="save">Connect</button>
+  </div>
+</section>
+
+<!-- Episode list -->
+<section id="list" class="hidden">
+  <p class="sub" id="updated"></p>
+  <div id="eps"></div>
+  <button class="btn wide" id="forget">Disconnect this phone</button>
+</section>
+
+<!-- Review screen -->
+<section id="review" class="hidden">
+  <div>
+    <div class="sub" id="vlabel"></div>
+    <video id="vid" playsinline controls preload="metadata"></video>
+    <div class="parts" id="parts"></div>
+    <div class="timebar"><span id="now">0:00</span><span id="dl"></span></div>
+    <button class="btn wide" id="save-offline">Save video for no signal</button>
+  </div>
+  <div>
+    <div id="qbox" class="q hidden">
+      <div class="small">Claude is asking</div>
+      <div id="qtext" style="margin:4px 0 8px"></div>
+      <textarea class="field" id="qans" placeholder="Your answer"></textarea>
+      <button class="btn primary wide" id="qsend">Send answer</button>
+    </div>
+    <div id="reqstate" class="state"></div>
+    <div class="card">
+      <div class="row">
+        <input class="field" id="ntext" placeholder="Note at this moment">
+        <button class="btn primary" id="nadd">Add</button>
+      </div>
+      <div class="small" id="nhint" style="margin-top:6px">The note is pinned to where the video is now.</div>
+      <div id="notes" style="margin-top:8px"></div>
+    </div>
+    <button class="btn primary wide" id="rebuild" disabled>Rebuild with these notes</button>
+  </div>
+</section>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('shed.' + k); return v == null ? d : JSON.parse(v); } catch (_) { return d; } },
+  set(k, v) { try { localStorage.setItem('shed.' + k, JSON.stringify(v)); } catch (_) {} },
+  del(k) { try { localStorage.removeItem('shed.' + k); } catch (_) {} },
+};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const fmt = t => { t = Math.max(0, Math.floor(t || 0)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+
+let cfg = LS.get('cfg', null);       // {repo, token}
+let status = LS.get('status', null); // last status.json, so the list still shows with no signal
+let cur = null;                       // episode on the review screen
+
+function showErr(text) { const m = $('msg'); m.textContent = text || ''; m.classList.toggle('hidden', !text); }
+function screen(name) {
+  for (const s of ['setup', 'list', 'review']) { $(s).classList.toggle('hidden', s !== name); $(s).classList.toggle('on', s === name); }
+  $('back').classList.toggle('hidden', name !== 'review');
+  $('refresh').classList.toggle('hidden', name === 'setup');
+  if (name !== 'review') $('title').textContent = 'Shed Offline';
+}
+
+// ---------- GitHub store ----------
+const API = 'https://api.github.com';
+function gh(path, opts = {}) {
+  const h = {'Authorization': `Bearer ${cfg.token}`, 'X-GitHub-Api-Version': '2022-11-28', ...(opts.headers || {})};
+  return fetch(`${API}/repos/${cfg.repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}${opts.q || ''}`,
+    {method: opts.method || 'GET', headers: h, body: opts.body, cache: 'no-store'});
+}
+// Videos live on the "videos" branch, which is replaced each time so old versions don't pile up.
+async function ghRaw(path, asBlob, ref) {
+  const r = await gh(path, {headers: {Accept: 'application/vnd.github.raw'}, q: `?t=${Date.now()}${ref ? '&ref=' + ref : ''}`});
+  if (r.status === 401) throw new Error('The GitHub key was refused. Disconnect and paste a new one.');
+  if (r.status === 404) throw new Error(`Not found in the store: ${path}`);
+  if (!r.ok) throw new Error(`GitHub said ${r.status}`);
+  return asBlob ? r.blob() : r.json();
+}
+const b64 = s => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+async function ghPut(path, obj, message) {
+  const r = await gh(path, {method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({message, content: b64(JSON.stringify(obj, null, 2) + '\n')})});
+  if (!r.ok) throw new Error(`Couldn't save to GitHub (${r.status})`);
+  return r.json();
+}
+
+// ---------- Episode list ----------
+async function load() {
+  showErr('');
+  try {
+    status = await ghRaw('status.json');
+    LS.set('status', status);
+  } catch (e) {
+    if (!status) { showErr(navigator.onLine ? e.message : 'No signal, and nothing saved on this phone yet.'); }
+    else showErr((navigator.onLine ? e.message : 'No signal.') + ' Showing what was saved last time.');
+  }
+  render();
+  if (cur) { const e = (status?.episodes || []).find(x => x.id === cur.id); if (e) { cur = e; renderReqState(); } }
+}
+
+function stateLine(e) {
+  const q = e.request || {};
+  if (q.status === 'question') return ['question', `Claude has a question: ${q.question}`];
+  if (q.status === 'working') return ['working', `Rebuilding${q.step ? ': ' + q.step : ''}`];
+  if (q.status === 'queued') return ['queued', 'Rebuild asked for, waiting to start'];
+  if (q.status === 'done' && e.video) return ['ready', `New video ready to review`];
+  if (q.status === 'failed') return ['question', `Rebuild hit a problem: ${q.step || 'see the thread'}`];
+  return ['', ''];
+}
+
+function render() {
+  const eps = status?.episodes || [];
+  $('mode').textContent = status?.pc === 'on' ? 'PC on' : 'PC off';
+  $('updated').textContent = status?.updated ? `Store updated ${new Date(status.updated).toLocaleString()}` : '';
+  $('eps').innerHTML = eps.length ? eps.map(e => {
+    const [cls, txt] = stateLine(e);
+    return `<div class="card ep" data-id="${esc(e.id)}">
+      <span class="dot ${e.state === 'green' ? 'green' : 'red'}"></span>
+      <div style="flex:1;min-width:0">
+        <h2>${esc(e.title)}</h2>
+        <div class="sub">${esc(e.channel)} · Episode ${esc(e.num)}${e.video ? ' · ' + esc(e.video.label) : ''}</div>
+        ${e.state !== 'green' ? `<div class="sub">${esc(e.reason || 'Waiting for the PC')}</div>` : ''}
+        ${txt ? `<div class="state ${cls}">${esc(txt)}</div>` : ''}
+      </div></div>`;
+  }).join('') : '<p class="sub">No episodes in the store yet.</p>';
+}
+
+$('eps').addEventListener('click', ev => {
+  const c = ev.target.closest('.ep'); if (!c) return;
+  const e = (status?.episodes || []).find(x => x.id === c.dataset.id); if (!e) return;
+  if (e.state !== 'green') { showErr(`${e.title} can't be worked on until the PC is back. ${e.reason || ''}`); return; }
+  openReview(e);
+});
+
+// ---------- Review ----------
+let parts = [], partIdx = 0, offsets = [];
+const nkey = () => `notes.${cur.id}.${cur.video?.id || 'none'}`;
+const getNotes = () => LS.get(nkey(), []);
+const setNotes = n => { LS.set(nkey(), n); renderNotes(); };
+
+async function openReview(e) {
+  cur = e; showErr('');
+  screen('review');
+  $('title').textContent = `Ep ${e.num}`;
+  $('vlabel').textContent = `${e.title}${e.video ? ' · ' + e.video.label : ''}`;
+  parts = e.video?.parts || [];
+  offsets = []; let acc = 0;
+  for (const p of parts) { offsets.push(acc); acc += p.duration || 0; }
+  $('parts').innerHTML = parts.length > 1 ? parts.map((p, i) => `<button class="chip" data-p="${i}">Part ${i + 1}</button>`).join('') : '';
+  renderNotes(); renderReqState();
+  if (!parts.length) { showErr('No video for this episode in the store yet.'); return; }
+  await loadPart(0);
+}
+
+async function partURL(p) {
+  try {
+    const c = await caches.open('shed-videos');
+    const hit = await c.match(p.path);
+    if (hit) return URL.createObjectURL(await hit.blob());
+  } catch (_) {}
+  $('dl').textContent = 'Downloading…';
+  const blob = await ghRaw(p.path, true, 'videos');
+  $('dl').textContent = '';
+  return URL.createObjectURL(blob);
+}
+
+async function loadPart(i, seekTo = 0, play = false) {
+  partIdx = i;
+  for (const b of $('parts').querySelectorAll('.chip')) b.setAttribute('aria-pressed', String(+b.dataset.p === i));
+  const v = $('vid');
+  try {
+    const url = await partURL(parts[i]);
+    if (v.src) URL.revokeObjectURL(v.src);
+    v.src = url;
+    v.addEventListener('loadedmetadata', () => { v.currentTime = seekTo; if (play) v.play().catch(() => {}); }, {once: true});
+  } catch (e) { $('dl').textContent = ''; showErr(e.message); }
+}
+
+const globalTime = () => (offsets[partIdx] || 0) + ($('vid').currentTime || 0);
+function seekGlobal(t) {
+  let i = 0; while (i + 1 < parts.length && offsets[i + 1] <= t) i++;
+  if (i === partIdx) $('vid').currentTime = t - offsets[i]; else loadPart(i, t - offsets[i]);
+}
+
+$('vid').addEventListener('timeupdate', () => { $('now').textContent = fmt(globalTime()); });
+$('vid').addEventListener('loadedmetadata', () => {   // fill in a part length the store didn't give us
+  const d = $('vid').duration; if (!parts[partIdx] || parts[partIdx].duration || !isFinite(d)) return;
+  parts[partIdx].duration = d; let acc = 0; offsets = parts.map(p => { const o = acc; acc += p.duration || 0; return o; });
+});
+$('vid').addEventListener('ended', () => { if (partIdx + 1 < parts.length) loadPart(partIdx + 1, 0, true); });
+$('parts').addEventListener('click', ev => { const b = ev.target.closest('.chip'); if (b) loadPart(+b.dataset.p); });
+
+function renderNotes() {
+  const n = getNotes().sort((a, b) => a.t - b.t);
+  $('notes').innerHTML = n.map((x, i) => `<div class="note"><span class="t" data-t="${x.t}">${fmt(x.t)}</span>
+    <span class="txt">${esc(x.text)}</span><button class="x" data-i="${i}" aria-label="Delete">×</button></div>`).join('');
+  $('rebuild').disabled = !n.length || ['queued', 'working'].includes(cur?.request?.status);
+}
+$('notes').addEventListener('click', ev => {
+  const t = ev.target.closest('.t'); if (t) { seekGlobal(+t.dataset.t); return; }
+  const x = ev.target.closest('.x'); if (x) { const n = getNotes().sort((a, b) => a.t - b.t); n.splice(+x.dataset.i, 1); setNotes(n); }
+});
+function addNote() {
+  const text = $('ntext').value.trim(); if (!text) return;
+  setNotes([...getNotes(), {t: Math.round(globalTime() * 10) / 10, text}]);
+  $('ntext').value = '';
+}
+$('nadd').addEventListener('click', addNote);
+$('ntext').addEventListener('keydown', ev => { if (ev.key === 'Enter') addNote(); });
+$('ntext').addEventListener('focus', () => { $('vid').pause(); $('nhint').textContent = `Pinned at ${fmt(globalTime())}.`; });
+
+function renderReqState() {
+  const [cls, txt] = stateLine(cur);
+  $('reqstate').className = `state ${cls}`; $('reqstate').textContent = txt;
+  const q = cur.request || {};
+  $('qbox').classList.toggle('hidden', q.status !== 'question');
+  $('qtext').textContent = q.question || '';
+  renderNotes();
+}
+
+const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
+$('rebuild').addEventListener('click', async () => {
+  const notes = getNotes().sort((a, b) => a.t - b.t);
+  if (!notes.length || !confirm(`Send ${notes.length} note${notes.length > 1 ? 's' : ''} and rebuild ${cur.title}?`)) return;
+  $('rebuild').disabled = true;
+  try {
+    const id = stamp();
+    await ghPut(`requests/${cur.id}/${id}.json`, {type: 'rebuild', episode: cur.id, video: cur.video?.id || null,
+      notes, from: 'phone', created: new Date().toISOString()}, `Rebuild notes for ${cur.id} from the phone`);
+    LS.set(`sent.${nkey()}`, notes); setNotes([]);
+    cur.request = {id, status: 'queued'}; renderReqState();
+  } catch (e) { showErr(e.message); $('rebuild').disabled = false; }
+});
+$('qsend').addEventListener('click', async () => {
+  const text = $('qans').value.trim(); if (!text) return;
+  try {
+    await ghPut(`requests/${cur.id}/${stamp()}-answer.json`, {type: 'answer', episode: cur.id, to: cur.request?.id || null,
+      question: cur.request?.question || '', answer: text, from: 'phone', created: new Date().toISOString()}, `Answer for ${cur.id} from the phone`);
+    $('qans').value = ''; cur.request = {...cur.request, status: 'queued', question: ''}; renderReqState();
+  } catch (e) { showErr(e.message); }
+});
+
+$('save-offline').addEventListener('click', async () => {
+  if (!parts.length) return;
+  const b = $('save-offline'); b.disabled = true;
+  try {
+    const c = await caches.open('shed-videos');
+    for (let i = 0; i < parts.length; i++) {
+      b.textContent = `Saving part ${i + 1} of ${parts.length}…`;
+      if (!(await c.match(parts[i].path))) await c.put(parts[i].path, new Response(await ghRaw(parts[i].path, true, 'videos')));
+    }
+    b.textContent = 'Saved for no signal';
+  } catch (e) { showErr(e.message); b.textContent = 'Save video for no signal'; b.disabled = false; }
+});
+
+// ---------- Setup and navigation ----------
+$('save').addEventListener('click', async () => {
+  const repo = $('repo').value.trim(), token = $('tok').value.trim();
+  if (!repo.includes('/') || !token) { showErr('Fill in both boxes.'); return; }
+  cfg = {repo, token}; LS.set('cfg', cfg); $('tok').value = '';
+  screen('list'); await load();
+});
+$('forget').addEventListener('click', () => {
+  if (!confirm('Remove the GitHub key from this phone?')) return;
+  LS.del('cfg'); LS.del('status'); cfg = null; status = null; screen('setup');
+});
+$('back').addEventListener('click', () => { cur = null; $('vid').pause(); screen('list'); render(); });
+$('refresh').addEventListener('click', load);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && cfg) load(); });
+setInterval(() => { if (!document.hidden && cfg) load(); }, 60000);
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if (cfg) { screen('list'); render(); load(); } else screen('setup');
+</script>
+</body>
+</html>
