@@ -77,7 +77,7 @@ video{width:100%;border-radius:12px;background:#000;max-height:42vh}
     <label class="small" for="repo">Store</label>
     <input class="field" id="repo" value="buttymanUK/shed-cloud" autocapitalize="off" autocomplete="off" spellcheck="false">
     <label class="small" for="tok">GitHub key</label>
-    <input class="field" id="tok" type="password" placeholder="github_pat_…" autocapitalize="off" autocomplete="off" spellcheck="false">
+    <input class="field" id="tok" type="text" placeholder="github_pat_…" autocapitalize="off" autocomplete="off" name="shed-key" data-lpignore="true" data-1p-ignore spellcheck="false">
     <button class="btn primary wide" id="save">Connect</button>
   </div>
 </section>
@@ -347,6 +347,7 @@ $('save-offline').addEventListener('click', async () => {
 $('save').addEventListener('click', async () => {
   const repo = $('repo').value.trim(), token = $('tok').value.trim();
   if (!repo.includes('/') || !token) { showErr('Fill in both boxes.'); return; }
+  if (!/^(github_pat_|ghp_)/.test(token)) { showErr('That doesn\'t look like a GitHub key. It should start with github_pat_. Copy it again from GitHub.'); return; }
   cfg = {repo, token}; LS.set('cfg', cfg); $('tok').value = '';
   screen('list'); await load();
 });

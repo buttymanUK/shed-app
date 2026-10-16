@@ -1,5 +1,5 @@
 // Keeps the app itself on the phone so it opens with no signal. Videos are saved separately ("shed-videos").
-const SHELL = 'shed-shell-v2';
+const SHELL = 'shed-shell-v3';
 const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(SHELL).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
