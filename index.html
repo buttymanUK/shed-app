@@ -288,14 +288,22 @@ $('notes').addEventListener('click', ev => {
   const t = ev.target.closest('.t'); if (t) { seekGlobal(+t.dataset.t); return; }
   const x = ev.target.closest('.x'); if (x) { const n = getNotes().sort((a, b) => a.t - b.t); n.splice(+x.dataset.i, 1); setNotes(n); }
 });
+let pinned = null;  // the moment the note being typed was started: it stays there even if the video plays on
 function addNote() {
   const text = $('ntext').value.trim(); if (!text) return;
-  setNotes([...getNotes(), {t: Math.round(globalTime() * 10) / 10, text}]);
-  $('ntext').value = '';
+  setNotes([...getNotes(), {t: Math.round((pinned ?? globalTime()) * 10) / 10, text}]);
+  $('ntext').value = ''; pinned = null; $('nhint').textContent = 'The note is pinned to where the video is now.';
 }
 $('nadd').addEventListener('click', addNote);
 $('ntext').addEventListener('keydown', ev => { if (ev.key === 'Enter') addNote(); });
-$('ntext').addEventListener('focus', () => { $('vid').pause(); $('nhint').textContent = `Pinned at ${fmt(globalTime())}.`; });
+$('ntext').addEventListener('focus', () => {
+  $('vid').pause(); if (pinned == null || !$('ntext').value.trim()) pinned = globalTime();
+  $('nhint').textContent = `Pinned at ${fmt(pinned)}.`;
+});
+$('ntext').addEventListener('input', () => {
+  if (!$('ntext').value.trim()) pinned = null; else if (pinned == null) pinned = globalTime();
+  $('nhint').textContent = pinned == null ? 'The note is pinned to where the video is now.' : `Pinned at ${fmt(pinned)}.`;
+});
 
 function renderReqState() {
   const [cls, txt] = stateLine(cur);
