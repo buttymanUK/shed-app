@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14181d">
+<title>Watch &amp; make notes</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+html,body{margin:0;height:100%;background:#e4e7eb;font-family:'Segoe UI',Roboto,system-ui,sans-serif}
+body{display:flex;flex-direction:column}
+#bar{display:flex;align-items:center;gap:10px;padding:8px 12px;padding-top:max(8px,env(safe-area-inset-top));background:#14181d;color:#f1f3f5}
+#bar button{border:0;border-radius:18px;padding:9px 14px;font:600 14px inherit;font-family:inherit;background:#fff;color:#14181d;cursor:pointer;min-height:40px}
+#title{flex:1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#sync{font-size:13px;color:#b6bec9;white-space:nowrap}
+#sync.wait{color:#f2c35b}#sync.bad{color:#ff9a96}
+#who{font-size:13px;color:#b6bec9;background:none;border:1px solid #3a4350!important;color:#dfe3e8!important;background:#232a33!important}
+#f{flex:1;border:0;width:100%;background:#e4e7eb}
+#load{margin:40px auto;max-width:520px;text-align:center;color:#3c444e;padding:0 16px;line-height:1.5}
+#load b{display:block;font-size:18px;margin-bottom:6px;color:#14181d}
+progress{width:100%;height:10px;margin-top:12px}
+</style>
+</head>
+<body>
+<div id="bar"><button id="back">Back</button><span id="title">Watch &amp; make notes</span>
+  <span id="sync"></span><button id="who" title="Your name goes with your notes, so Paul knows who wrote them"></button></div>
+<div id="load"><b id="lt">Getting the episode…</b><span id="ls"></span><progress id="lp" max="1" value="0" hidden></progress></div>
+<iframe id="f" hidden allow="autoplay; fullscreen" title="Notes player"></iframe>
+<script>
+'use strict';
+// The PC's own notes player (review/player.html in the store), run on this tablet with the store behind it instead of
+// the PC. Notes are kept on the tablet until they're sent, then go to the store as a list of changes; the PC puts
+// them into the episode's own notes, so they count as snags there. Nothing is rebuilt from here.
+const $ = id => document.getElementById(id);
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('shed.' + k); return v == null ? d : JSON.parse(v); } catch (_) { return d; } },
+  set(k, v) { try { localStorage.setItem('shed.' + k, JSON.stringify(v)); } catch (_) {} },
+};
+const cfg = LS.get('cfg', null);
+const epId = new URLSearchParams(location.search).get('ep');
+const API = 'https://api.github.com';
+const enc = p => p.split('/').map(encodeURIComponent).join('/');
+const head = extra => ({'Authorization': `Bearer ${cfg.token}`, 'X-GitHub-Api-Version': '2022-11-28', ...(extra || {})});
+let ep = null, rv = null, state = null, ticked = new Set(), rebuildAsked = false;
+
+function fail(t, s) { $('lt').textContent = t; $('ls').textContent = s || ''; $('lp').hidden = true; $('load').hidden = false; $('f').hidden = true; }
+$('back').onclick = () => { flush(); location.href = './'; };
+
+async function raw(path, ref) {
+  const r = await fetch(`${API}/repos/${cfg.repo}/contents/${enc(path)}?t=${Date.now()}${ref ? '&ref=' + ref : ''}`,
+    {headers: head({Accept: 'application/vnd.github.raw'}), cache: 'no-store'});
+  if (r.status === 401) throw new Error('The GitHub key was refused. Go back, disconnect and paste a new one.');
+  if (r.status === 404) throw new Error('Not in the store: ' + path);
+  if (!r.ok) throw new Error('GitHub said ' + r.status);
+  return r;
+}
+
+// ---- the video: downloaded once, kept on the tablet so it plays with no signal
+async function video() {
+  const key = `${rv.video.path}#${rv.video.id}`;
+  let cache = null;
+  try { cache = await caches.open('shed-videos'); const hit = await cache.match(key); if (hit) return URL.createObjectURL(await hit.blob()); } catch (_) {}
+  $('lt').textContent = 'Downloading the video…'; $('ls').textContent = 'Only the first time. After that it plays with no signal.';
+  const r = await raw(rv.video.path, 'videos');
+  const total = +r.headers.get('Content-Length') || 0, rd = r.body.getReader(), parts = [];
+  let got = 0; $('lp').hidden = false;
+  for (;;) { const {done, value} = await rd.read(); if (done) break; parts.push(value); got += value.length;
+    if (total) $('lp').value = got / total; $('ls').textContent = `${(got / 1048576).toFixed(1)} MB${total ? ' of ' + (total / 1048576).toFixed(1) + ' MB' : ''}`; }
+  const blob = new Blob(parts, {type: 'video/mp4'});
+  try { if (cache) await cache.put(key, new Response(blob)); } catch (_) {}
+  return URL.createObjectURL(blob);
+}
+
+// ---- the notes: the PC's when it was sent, with this tablet's changes on top
+const skey = () => `away.${epId}.${rv.video.id}`;
+function save() { LS.set(skey(), state); syncLine(); }
+const now = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+function sceneAt(t) { let s = null; for (const x of rv.scenes || []) if (x.at != null && t >= x.at) s = x; return s; }
+function sceneLen(num) {
+  const at = (rv.scenes || []).filter(x => x.at != null).sort((a, b) => a.at - b.at), i = at.findIndex(x => x.num === num);
+  const nxt = i >= 0 && i + 1 < at.length ? at[i + 1].at : rv.length;
+  return i >= 0 && nxt ? nxt - at[i].at : null;
+}
+function notes(all) {
+  const out = [];
+  for (const n0 of (rv.notes || []).concat(state.added)) {
+    if (state.deleted.includes(n0.id)) continue;
+    const n = Object.assign({}, n0, state.changes[n0.id] || {});
+    if (n.resolved && !all && !ticked.has(n.id) && !n.fixed) continue;
+    out.push(n);
+  }
+  return out.sort((a, b) => (a.t || 0) - (b.t || 0));
+}
+function op(o) { state.outbox.push(Object.assign({at: now()}, o)); save(); clearTimeout(op.t); op.t = setTimeout(flush, 1500); }
+
+window.SHED = {
+  async handle(url, opts) {
+    const u = new URL(url, 'https://x/'), path = u.pathname, body = opts && opts.body && typeof opts.body === 'string' ? JSON.parse(opts.body || '{}') : {};
+    const all = u.searchParams.get('all') === '1';
+    if (path === '/scenes') return rv.scenes || [];
+    if (path === '/notes') return notes(all);
+    if (path === '/add') {
+      const text = String(body.text || '').trim().slice(0, 2000); if (!text) return notes();
+      const t = +body.t || 0, sc = sceneAt(t), id = 'o' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const n = {id, video: rv.video.label, t: Math.round(t * 10) / 10, scene: sc ? sc.num : '', scene_name: sc ? sc.name : '', text, at: now(), resolved: false, by: who()};
+      if (sc) { const off = t - sc.at, len = sceneLen(sc.num); n.scene_off = Math.round(off * 100) / 100; if (len) n.scene_frac = Math.round(Math.max(0, Math.min(1, off / len)) * 1e4) / 1e4; }
+      state.added.push(n); op({op: 'add', id, note: n}); return notes();
+    }
+    if (path === '/update') {
+      const ch = state.changes[body.id] = state.changes[body.id] || {}, o = {op: 'update', id: body.id};
+      const mine = state.added.find(n => n.id === body.id);
+      if (String(body.text || '').trim()) { ch.text = o.text = String(body.text).trim().slice(0, 2000); if (mine) mine.text = ch.text; }
+      if ('resolved' in body) { ch.resolved = o.resolved = !!body.resolved; if (ch.resolved) ticked.add(body.id); }
+      if (body.fix === 'ok') { o.fix = 'ok'; ticked.add(body.id); ch.fixed = false; ch.resolved = true; }
+      if (body.fix === 'again') { o.fix = 'again'; ch.resolved = false; ch.fixed = false; }
+      op(o); return notes();
+    }
+    if (path === '/delete') {
+      if (state.added.some(n => n.id === body.id)) { state.deleted.push(body.id); op({op: 'delete', id: body.id}); }
+      return notes();
+    }
+    if (path === '/subscribe') return {at: null};
+    if (path === '/length') { rv.length = +body.len || rv.length; return {}; }
+    if (path === '/exit') { if (body.do === 'rebuild') { rebuildAsked = true; state.rebuild = true; save(); } await flush(); location.href = './'; return {}; }
+    return {};
+  },
+  closed() { flush(); location.href = './'; },
+};
+
+// ---- sending: every change, as soon as there's signal. Sent twice is fine: the PC never adds a note twice.
+let sending = false;
+async function flush() {
+  if (sending || !state || (!state.outbox.length && !state.rebuild)) return;
+  if (!navigator.onLine) { syncLine(); return; }
+  sending = true; syncLine();
+  const ops = state.outbox.slice(), rebuild = !!state.rebuild;
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-'), name = `requests/${epId}/${stamp}-${Math.random().toString(36).slice(2, 7)}.json`;
+  const req = {type: 'notes', by: who(), video: rv.video.label, video_id: rv.video.id, ops, rebuild, sent: new Date().toISOString()};
+  try {
+    const r = await fetch(`${API}/repos/${cfg.repo}/contents/${enc(name)}`, {method: 'PUT', headers: head({'Content-Type': 'application/json'}),
+      body: JSON.stringify({message: `Snags for ${epId} from ${who()}`, content: btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(req, null, 1))))})});
+    if (!r.ok) throw new Error(r.status);
+    state.outbox.splice(0, ops.length); if (rebuild) state.rebuild = false; save();
+  } catch (_) { state.err = true; }
+  sending = false; syncLine();
+  if (state.outbox.length) setTimeout(flush, 5000);
+}
+function syncLine() {
+  const s = $('sync'); if (!state) { s.textContent = ''; return; }
+  const n = state.outbox.length;
+  if (sending) { s.className = 'wait'; s.textContent = 'Sending…'; }
+  else if (!n) { s.className = ''; s.textContent = '✓ Snags sent to Paul\'s PC'; }
+  else if (!navigator.onLine) { s.className = 'bad'; s.textContent = `${n} change${n > 1 ? 's' : ''} kept here: no signal`; }
+  else { s.className = 'wait'; s.textContent = `${n} change${n > 1 ? 's' : ''} waiting to send`; }
+}
+window.addEventListener('online', flush); window.addEventListener('offline', syncLine);
+setInterval(flush, 15000);
+
+function who() { return LS.get('reviewer', '') || 'Tablet'; }
+function askWho(force) {
+  let w = LS.get('reviewer', '');
+  if (!w || force) { w = (prompt('Your name, so Paul knows whose snags these are:', w || '') || w || '').trim().slice(0, 40); if (w) LS.set('reviewer', w); }
+  $('who').textContent = who();
+}
+$('who').onclick = () => askWho(true);
+
+// ---- the player page from the PC, with this tablet's store behind it
+const SHIM = `<script>
+(function(){const P=parent.SHED;
+window.fetch=async function(u,o){const r=await P.handle(String(u),o||{});return new Response(JSON.stringify(r),{headers:{'Content-Type':'application/json'}})};
+window.close=function(){P.closed()};
+document.addEventListener('DOMContentLoaded',function(){var v=document.getElementById('v');if(v){v.setAttribute('playsinline','');v.src=parent.SHED_VIDEO}});
+})();<\/script>
+<style>#vnb,#cc,button[onclick^="sayBox"],button[onclick^="swapOpen"],button[onclick="quit('compare')"]{display:none!important}
+body{height:100%!important}</style>`;
+
+async function start() {
+  if (!cfg) { fail('This tablet isn\'t connected to the store yet.', 'Go back and paste the GitHub key first.'); return; }
+  if (!epId) { fail('No episode picked.', 'Go back and pick one.'); return; }
+  let st;
+  try { st = await (await raw('status.json')).json(); LS.set('status', st); }
+  catch (e) { st = LS.get('status', null); if (!st) { fail('Can\'t reach the store.', e.message); return; } }
+  ep = (st.episodes || []).find(x => x.id === epId);
+  rv = ep && ep.review;
+  if (!rv) { fail('This episode hasn\'t been sent for review yet.', 'On the PC: More, then Send for review away from home.'); return; }
+  $('title').textContent = ep.title || ep.id;
+  state = LS.get(`away.${epId}.${rv.video.id}`, null) || {added: [], changes: {}, deleted: [], outbox: [], rebuild: false};
+  askWho(false); syncLine();
+  let page;
+  try { page = await (await raw('review/player.html')).text(); LS.set('player', page); }
+  catch (e) { page = LS.get('player', null); if (!page) { fail('Can\'t get the player.', e.message); return; } }
+  try { window.SHED_VIDEO = await video(); }
+  catch (e) { fail('Couldn\'t get the video.', e.message); return; }
+  page = page.replace(/src="\/video"/, 'src=""').replace(/<track[^>]*src="\/subs"[^>]*>/, '');
+  page = page.includes('<head>') ? page.replace('<head>', '<head>' + SHIM) : SHIM + page;
+  $('load').hidden = true; $('f').hidden = false; $('f').srcdoc = page;
+  flush();
+}
+start();
+</script>
+</body>
+</html>
