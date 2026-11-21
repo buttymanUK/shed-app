@@ -172,6 +172,10 @@ function ring(text) {
     body: JSON.stringify({body: text})}).catch(() => {});
 }
 
+// A tablet, or the phone in DeX (a TV or glasses), is a big screen: it gets Watch & make notes. A phone doesn't.
+function bigScreen() { return Math.min(innerWidth, innerHeight) >= 600 || innerWidth >= 1000; }
+addEventListener('resize', () => render());
+
 // ---------- Episode list ----------
 async function load() {
   showErr('');
@@ -209,6 +213,7 @@ function render() {
         <div class="sub">${esc(e.channel)} · Episode ${esc(e.num)}${e.video ? ' · ' + esc(e.video.label) : ''}</div>
         ${e.state !== 'green' ? `<div class="sub">${esc(e.reason || 'Waiting for the PC')}</div>` : ''}
         ${txt ? `<div class="state ${cls}">${esc(txt)}</div>` : ''}
+        ${e.review && bigScreen() ? `<div class="state ready">Watch &amp; make notes${e.review.notes && e.review.notes.length ? ' · ' + e.review.notes.length + ' snags so far' : ''}</div>` : ''}
       </div></div>`;
   }).join('') : '<p class="sub">No episodes in the store yet.</p>';
 }
@@ -216,6 +221,8 @@ function render() {
 $('eps').addEventListener('click', ev => {
   const c = ev.target.closest('.ep'); if (!c) return;
   const e = (status?.episodes || []).find(x => x.id === c.dataset.id); if (!e) return;
+  if (e.review && bigScreen()) { location.href = 'review.html?ep=' + encodeURIComponent(e.id); return; }
+  if (!bigScreen()) { showErr('Watching and snags are on the tablet, the PC, or the phone in DeX. The phone just shows where things are.'); return; }
   if (e.state !== 'green') { showErr(`${e.title} can't be worked on until the PC is back. ${e.reason || ''}`); return; }
   openReview(e);
 });
@@ -288,14 +295,22 @@ $('notes').addEventListener('click', ev => {
   const t = ev.target.closest('.t'); if (t) { seekGlobal(+t.dataset.t); return; }
   const x = ev.target.closest('.x'); if (x) { const n = getNotes().sort((a, b) => a.t - b.t); n.splice(+x.dataset.i, 1); setNotes(n); }
 });
+let pinned = null;  // the moment the note being typed was started: it stays there even if the video plays on
 function addNote() {
   const text = $('ntext').value.trim(); if (!text) return;
-  setNotes([...getNotes(), {t: Math.round(globalTime() * 10) / 10, text}]);
-  $('ntext').value = '';
+  setNotes([...getNotes(), {t: Math.round((pinned ?? globalTime()) * 10) / 10, text}]);
+  $('ntext').value = ''; pinned = null; $('nhint').textContent = 'The note is pinned to where the video is now.';
 }
 $('nadd').addEventListener('click', addNote);
 $('ntext').addEventListener('keydown', ev => { if (ev.key === 'Enter') addNote(); });
-$('ntext').addEventListener('focus', () => { $('vid').pause(); $('nhint').textContent = `Pinned at ${fmt(globalTime())}.`; });
+$('ntext').addEventListener('focus', () => {
+  $('vid').pause(); if (pinned == null || !$('ntext').value.trim()) pinned = globalTime();
+  $('nhint').textContent = `Pinned at ${fmt(pinned)}.`;
+});
+$('ntext').addEventListener('input', () => {
+  if (!$('ntext').value.trim()) pinned = null; else if (pinned == null) pinned = globalTime();
+  $('nhint').textContent = pinned == null ? 'The note is pinned to where the video is now.' : `Pinned at ${fmt(pinned)}.`;
+});
 
 function renderReqState() {
   const [cls, txt] = stateLine(cur);
